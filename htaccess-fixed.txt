@@ -1,0 +1,133 @@
+# ===== OptimizeTechStudio — canonical host, single-hop redirects, caching =====
+
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteBase /
+
+# --- Canonicalise host + scheme in ONE hop ---
+# Fires only when the request is NOT already https://www.optimizetechstudio.com
+# The three conditions below detect "already secure" across normal Apache,
+# proxied/CDN setups (X-Forwarded-Proto) and LiteSpeed (HTTPS=on).
+RewriteCond %{HTTP_HOST} !^www\.optimizetechstudio\.com$ [NC,OR]
+RewriteCond %{HTTPS} !=on
+RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+RewriteCond %{HTTP:X-Forwarded-SSL} !=on
+RewriteCond %{SERVER_PORT} !^443$
+RewriteRule ^(.*)$ https://www.optimizetechstudio.com/$1 [R=301,L]
+
+# --- Force www when already on https (non-www -> www, one hop) ---
+RewriteCond %{HTTP_HOST} !^www\.optimizetechstudio\.com$ [NC]
+RewriteCond %{HTTP_HOST} !^$
+RewriteRule ^(.*)$ https://www.optimizetechstudio.com/$1 [R=301,L]
+
+# --- /index.html -> / (301, canonical home page) ---
+RewriteCond %{THE_REQUEST} ^[A-Z]{3,9}\ /.*index\.html?\ HTTP/
+RewriteRule ^(.*)index\.html?$ /$1 [R=301,L]
+
+# --- Legacy flat blog URL -> /blog/ location (301) ---
+RewriteRule ^blog-how-to-choose-a-software-development-company\.html$ /blog/how-to-choose-a-software-development-company.html [R=301,L]
+
+# --- Strip stray trailing slash after .html ---
+RewriteRule ^(.+)\.html/$ /$1.html [R=301,L]
+</IfModule>
+
+DirectoryIndex index.html
+
+# ===== Force indexability (overrides any host-level noindex header) =====
+<IfModule mod_headers.c>
+  # Some hosts / staging setups inject X-Robots-Tag: noindex at the server
+  # level, which silently blocks Google even when the HTML looks correct.
+  Header always unset X-Robots-Tag
+  Header always set X-Robots-Tag "index, follow, max-image-preview:large, max-snippet:-1"
+  Header always unset Pragma
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set X-Content-Type-Options "nosniff"
+</IfModule>
+
+# ===== Correct content types =====
+AddDefaultCharset UTF-8
+<IfModule mod_mime.c>
+  AddType text/html .html
+  AddType application/xml .xml
+  AddType text/plain .txt
+  AddType image/x-icon .ico
+  AddType image/png .png
+  AddType application/manifest+json .webmanifest
+</IfModule>
+
+# ===== Favicon: must be publicly fetchable, never redirected, long-cached =====
+<FilesMatch "^favicon\.ico$">
+  <IfModule mod_headers.c>
+    Header set Content-Type "image/x-icon"
+    Header set Cache-Control "public, max-age=604800"
+    Header always unset X-Robots-Tag
+  </IfModule>
+</FilesMatch>
+<FilesMatch "^icon-(48|96|180|192|512)\.png$">
+  <IfModule mod_headers.c>
+    Header set Cache-Control "public, max-age=604800"
+    Header always unset X-Robots-Tag
+  </IfModule>
+</FilesMatch>
+
+# ===== Sitemap and robots must never be cached long or redirected =====
+<FilesMatch "^(sitemap\.xml|robots\.txt)$">
+  <IfModule mod_headers.c>
+    Header set Cache-Control "public, max-age=3600"
+  </IfModule>
+</FilesMatch>
+
+# ===== Caching =====
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType text/css "access plus 1 year"
+  ExpiresByType application/javascript "access plus 1 year"
+  ExpiresByType image/svg+xml "access plus 1 year"
+  ExpiresByType image/png "access plus 1 week"
+  ExpiresByType image/x-icon "access plus 1 week"
+  ExpiresByType image/jpeg "access plus 1 month"
+  ExpiresByType image/webp "access plus 1 month"
+  ExpiresByType text/html "access plus 1 hour"
+</IfModule>
+
+# ===== Explicit Cache-Control so browsers, CDNs and Google cache correctly =====
+<IfModule mod_headers.c>
+  # HTML: short cache, always revalidate so content edits go live immediately
+  <FilesMatch "\.html$">
+    Header set Cache-Control "public, max-age=600, must-revalidate"
+    Header unset Pragma
+  </FilesMatch>
+  # Fingerprinted CSS/JS (styles.css?v=g20, site.js): safe to cache for a year
+  <FilesMatch "\.(css|js)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  # Images
+  <FilesMatch "\.(png|jpe?g|webp|svg|gif|ico)$">
+    Header set Cache-Control "public, max-age=2592000"
+  </FilesMatch>
+  # Fonts
+  <FilesMatch "\.(woff2?|ttf|otf|eot)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+    Header set Access-Control-Allow-Origin "*"
+  </FilesMatch>
+</IfModule>
+
+# ===== ETag / Last-Modified: let Googlebot use 304 responses =====
+<IfModule mod_headers.c>
+  FileETag MTime Size
+</IfModule>
+
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css application/javascript application/json image/svg+xml application/xml text/plain application/xhtml+xml font/woff2
+</IfModule>
+
+<IfModule mod_brotli.c>
+  AddOutputFilterByType BROTLI_COMPRESS text/html text/css application/javascript application/json image/svg+xml application/xml text/plain
+</IfModule>
+
+# Vary on Accept-Encoding so CDNs cache compressed and plain copies separately
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html|css|js|xml|json|svg)$">
+    Header append Vary Accept-Encoding
+  </FilesMatch>
+</IfModule>
